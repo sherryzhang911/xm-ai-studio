@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>XM AI Studio · 思考-创作-剪辑-输出</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%236c5ce7'/><text x='50' y='68' font-size='52' text-anchor='middle' fill='white' font-family='Arial'>X</text></svg>">
+  <link rel="stylesheet" href="css/style.css?v=1788417600000">
+</head>
+<body>
+  <!-- 环境检测横幅（非 localhost:3000 环境时显示） -->
+  <div class="env-banner hidden" id="envBanner">
+    <span class="env-banner-ico">⚠️</span>
+    <span id="envBannerText"></span>
+    <button class="btn btn-sm" id="envBannerClose" style="margin-left:auto;flex-shrink:0">知道了</button>
+  </div>
+
+  <!-- ======= 应用骨架 ======= -->
+  <div class="app">
+    <!-- 侧边栏 -->
+    <aside class="sidebar" id="sidebar">
+      <div class="logo">
+        <div class="logo-mark">X</div>
+        <div class="logo-text">
+          <div class="logo-name">XM</div>
+          <div class="logo-sub">AI Studio</div>
+        </div>
+      </div>
+
+      <nav class="nav" id="nav">
+        <div class="nav-group-label">工作台</div>
+        <a class="nav-item" data-view="dashboard"><span class="nav-ico" data-ico="grid"></span>工作台<span class="nav-badge" id="navBadgePipeline">●</span></a>
+        <div class="nav-group-label">AI 创作</div>
+        <a class="nav-item" data-view="chat"><span class="nav-ico" data-ico="spark"></span>创意助手</a>
+        <a class="nav-item" data-view="image"><span class="nav-ico" data-ico="image"></span>AI 生图</a>
+        <a class="nav-item" data-view="video"><span class="nav-ico" data-ico="video"></span>AI 生视频</a>
+        <a class="nav-item" data-view="storyboard"><span class="nav-ico" data-ico="board"></span>故事板</a>
+        <a class="nav-item" data-view="pipeline"><span class="nav-ico" data-ico="pipe"></span>流水线生产</a>
+        <a class="nav-item" data-view="remake"><span class="nav-ico" data-ico="wand"></span>仿拍复刻</a>
+        <a class="nav-item" data-view="playable"><span class="nav-ico" data-ico="play"></span>AI 试玩</a>
+        <a class="nav-item" data-view="localize"><span class="nav-ico" data-ico="earth"></span>文字本地化</a>
+        <a class="nav-item" data-view="voice"><span class="nav-ico" data-ico="spark"></span>AI 配音</a>
+        <div class="nav-group-label">后期</div>
+        <a class="nav-item" data-view="editor"><span class="nav-ico" data-ico="cut"></span>智能剪辑</a>
+        <a class="nav-item" data-view="frammer"><span class="nav-ico" data-ico="image"></span>包框合成</a>
+        <a class="nav-item" data-view="resize"><span class="nav-ico" data-ico="film"></span>多尺寸适配</a>
+        <div class="nav-group-label">管理</div>
+        <a class="nav-item" data-view="gallery"><span class="nav-ico" data-ico="folder"></span>作品中心</a>
+      </nav>
+
+      <div class="sidebar-foot">
+        <div class="api-status" id="apiStatus">
+          <span class="dot"></span><span class="api-status-text">API 未配置</span>
+        </div>
+        <button class="btn btn-ghost btn-block" id="btnOpenSettings">
+          <span class="nav-ico" data-ico="gear" style="margin-right:8px"></span>连接设置
+        </button>
+      </div>
+    </aside>
+
+    <!-- 主区域 -->
+    <main class="main">
+      <header class="topbar">
+        <div class="topbar-title">
+          <h1 id="viewTitle">工作台</h1>
+          <p id="viewDesc">XM AI Studio · 思考-创作-剪辑-输出 全流程智能化</p>
+        </div>
+        <div class="topbar-actions">
+          <span class="env-chip" id="envChip"><span class="dot dot-green"></span>火山方舟</span>
+          <button class="btn btn-ghost btn-sm" id="btnQuickHelp">使用指南</button>
+        </div>
+      </header>
+
+      <section class="content" id="content">
+        <!-- 各模块视图由 JS 渲染 -->
+        <div class="view-loading"><div class="spinner"></div></div>
+      </section>
+    </main>
+  </div>
+
+  <!-- ======= 模态层 ======= -->
+  <div class="modal-mask hidden" id="modalMask"></div>
+  <div class="modal hidden" id="modalBox">
+    <div class="modal-head"><h3 id="modalTitle"></h3><button class="btn-icon" id="modalClose">✕</button></div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+
+  <!-- 设置弹窗 -->
+  <div class="modal-mask hidden" id="settingsMask"></div>
+  <div class="modal hidden" id="settingsModal">
+    <div class="modal-head"><h3>连接设置（API 服务商）</h3><button class="btn-icon" id="settingsClose">✕</button></div>
+    <div class="modal-body">
+      <div class="settings-hero">
+        <div class="settings-hero-ico">🚀</div>
+        <p>先选「你手上有哪种 Key」，再填对应位置——不认识不混淆</p>
+      </div>
+      <div style="display:flex;gap:8px;margin:8px 0 6px;flex-wrap:wrap">
+        <button class="btn btn-sm" id="setModeArk" data-mode="ark">☁️ 只有火山方舟</button>
+        <button class="btn btn-sm" id="setModeBili" data-mode="bili">🅱️ 只有 Bilibili</button>
+        <button class="btn btn-sm" id="setModeDual" data-mode="dual">🔀 两个都有（推荐）</button>
+      </div>
+      <div id="settingsProvRow">
+        <p style="font-size:11px;color:var(--text-3);margin:6px 0 2px"><b style="color:var(--text-1)">识别 / 对话用哪把</b>（AI 识别翻译 · 创意助手 · 试玩分析走它）</p>
+        <div style="display:flex;gap:8px;margin:6px 0 4px;flex-wrap:wrap">
+          <button class="btn btn-sm" id="setProvArk" data-prov="ark">☁️ 火山方舟（豆包 视觉/对话）</button>
+          <button class="btn btn-sm" id="setProvBili" data-prov="bili">🅱️ Bilibili llmapi（GPT-5.x 等 54 款）</button>
+        </div>
+      </div>
+      <label class="field">
+        <span class="field-label" id="settingsKeyLabel">火山方舟 API Key</span>
+        <input type="password" id="settingsApiKey" placeholder="sk-xxxx 或 32 位 Key" autocomplete="off">
+        <span class="field-hint" id="settingsKeyHint">仅保存在本机浏览器中，请求经本地服务转发，不对外暴露</span>
+      </label>
+      <label class="field" id="settingsArkFieldWrap">
+        <span class="field-label">火山方舟 Key（AI 生图 / 生视频 / ✨AI 抹除文字去Logo）</span>
+        <input type="password" id="settingsArkKey" placeholder="与识别共用同一把时可直接复制上方 Key" autocomplete="off">
+        <span class="field-hint">方舟管生图/视频/AI 抹除；识别可继续走 Bilibili——两把并存互不干扰</span>
+      </label>
+      <div id="settingsDualHint" style="padding:8px 10px;border-radius:8px;font-size:11.5px;line-height:1.7;margin:2px 0 6px;background:rgba(79,124,255,.06);border:1px dashed rgba(79,124,255,.3)"></div>
+      <div class="settings-steps">
+        <div class="step"><b>1</b><span>开通/获取 Key</span></div>
+        <div class="step"><b>2</b><span>填入并保存</span></div>
+        <div class="step"><b>3</b><span>自动检测连接</span></div>
+      </div>
+      <div class="settings-links" id="settingsLinks">
+        <a href="https://console.volcengine.com/ark/region:ark+cn-beijing/apikey" target="_blank">获取方舟 API Key →</a>
+        <a href="https://console.volcengine.com/ark/region:ark+cn-beijing/openManagement" target="_blank">开通方舟模型 →</a>
+      </div>
+      <button class="btn btn-primary btn-block" id="settingsSave">保存并检测连接</button>
+      <div class="settings-result hidden" id="settingsResult"></div>
+    </div>
+  </div>
+
+  <!-- Toast 容器 -->
+  <div class="toast-wrap" id="toastWrap"></div>
+
+  <!-- ffmpeg 加载（智能剪辑用，按需延迟加载） -->
+  <script src="js/api.js?v=1788417600000"></script>
+  <script src="js/store.js?v=1788417600000"></script>
+  <script src="js/ui.js?v=1788417600000"></script>
+  <script src="js/chat.js?v=1788417600000"></script>
+  <script src="js/image.js?v=1788417600000"></script>
+  <script src="js/video.js?v=1788417600000"></script>
+  <script src="js/storyboard.js?v=1788417600000"></script>
+  <script src="js/pipeline.js?v=1788417600000"></script>
+  <script src="js/editor.js?v=1788417600000"></script>
+  <script src="js/frammer.js?v=1788417600000"></script>
+  <script src="js/resize.js?v=1788417600000"></script>
+  <script src="js/remake.js?v=1788417600000"></script>
+  <script src="js/playable.js?v=1788417600000"></script>
+  <script src="js/localize.js?v=1788417600000"></script>
+  <script src="js/voice.js?v=1788417600000"></script>
+  <script src="js/gallery.js?v=1788417600000"></script>
+  <script src="js/app.js?v=1788417600000"></script>
+</body>
+</html>

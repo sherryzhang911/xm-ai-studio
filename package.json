@@ -1,0 +1,27 @@
+{
+  "name": "xm-ai-studio",
+  "version": "1.0.0",
+  "description": "XM AI Studio — 整合 AI 思考辅助、AI 生图、AI 生视频、故事板、流水线生产与智能剪辑成片的全流程 AI 创作平台（对接火山方舟）",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "ai",
+    "video",
+    "image",
+    "volcengine",
+    "ark",
+    "ffmpeg"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@ffmpeg/core": "^0.11.0",
+    "@ffmpeg/ffmpeg": "^0.11.6",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  }
+}
