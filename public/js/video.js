@@ -288,6 +288,8 @@ window.VideoView = (() => {
       listEl.__errBound = true;
       listEl.addEventListener('error', (e) => {
         if (!e.target || e.target.tagName !== 'VIDEO') return;
+        window.__vErr = { msg: (e.target.error && e.target.error.message) || 'unknown', code: e.target.error && e.target.error.code, src: String(e.target.currentSrc || e.target.src).slice(0, 130) };
+        console.warn('[video preview]', window.__vErr);
         const item = e.target.closest('.task-item');
         const thumb = item && item.querySelector('.thumb');
         if (item && thumb && !thumb.dataset.fail) {

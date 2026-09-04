@@ -585,47 +585,41 @@ app.get('/api/proxy', async (req, res) => {
     }
   } catch { /* hostname 解析失败交给 fetch */ }
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 300000);
-    try {
-      // 带浏览器 UA + Referer：TOS 等媒体域名对无 UA/无来源的请求会 403
-      const resp = await fetch(url, {
-        signal: controller.signal,
-        redirect: 'follow',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
-          'Accept': 'video/*,image/*,*/*;q=0.8',
-        },
-      });
-      if (!resp.ok) {
-        return fail(res, resp.status, 'PROXY_ERROR', `素材下载失败 HTTP ${resp.status}`);
+    // 用原生 https 请求（undici fetch 会吞掉 Range 头导致 206 失效；https.get 可靠透传）
+    const upUrl = new URL(url);
+    const lib = upUrl.protocol === 'http:' ? require('http') : require('https');
+    const fHeaders = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+      'Accept': 'video/*,image/*,*/*;q=0.8',
+      ...(req.headers.range ? { Range: req.headers.range } : {}),
+      ...(req.headers['if-range'] ? { 'If-Range': req.headers['if-range'] } : {}),
+    };
+    const upReq = lib.request(upUrl, { method: 'GET', headers: fHeaders });
+    upReq.on('response', (upResp) => {
+      if (upResp.statusCode >= 400) {
+        console.error('[proxy] 上游失败', upResp.statusCode, String(url).slice(0, 100));
+        fail(res, upResp.statusCode, 'PROXY_ERROR', `素材下载失败 HTTP ${upResp.statusCode}`);
+        upResp.resume();
+        return;
       }
-      const contentType = resp.headers.get('content-type') || 'application/octet-stream';
-      res.setHeader('Content-Type', contentType);
-      res.setHeader('Content-Length', resp.headers.get('content-length') || '');
-      res.setHeader('Cache-Control', 'public, max-age=3600');
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      // 流式转发
-      const reader = resp.body.getReader();
-      const nodeStream = new (require('stream').Readable)({
-        read() {},
+      // 原样透传状态与关键头（206/Content-Range/Accept-Ranges 保证浏览器可播放可拖动）
+      res.status(upResp.statusCode === 206 ? 206 : 200);
+      ['content-type', 'content-length', 'content-range', 'accept-ranges', 'cache-control'].forEach((h) => {
+        const v = upResp.headers[h];
+        if (v) res.setHeader(h, Array.isArray(v) ? v.join(', ') : v);
       });
-      nodeStream._reader = reader;
-      (async () => {
-        try {
-          for (;;) {
-            const { done, value } = await reader.read();
-            if (done) { nodeStream.push(null); break; }
-            nodeStream.push(Buffer.from(value));
-          }
-        } catch (e) {
-          nodeStream.destroy(e);
-        }
-      })();
-      nodeStream.pipe(res);
-    } finally {
-      clearTimeout(timer);
-    }
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      upResp.on('error', (e) => console.error('[proxy] 上游流错误:', (e && e.message) || e));
+      upResp.pipe(res);
+    });
+    upReq.on('error', (e) => {
+      console.error('[proxy] 连接失败:', String(url).slice(0, 120), '->', (e && e.message) || e);
+      if (!res.headersSent) fail(res, 502, 'PROXY_ERROR', e.message || '连接失败');
+      else res.end();
+    });
+    upReq.end();
+    // 请求/响应总超时保护
+    setTimeout(() => { try { upReq.destroy(); } catch { /* ignore */ } }, 300000);
   } catch (e) {
     console.error('[proxy] 素材拉取失败:', String(url).slice(0, 120), '->', (e && e.message) || e);
     fail(res, 502, 'PROXY_ERROR', e.message || '素材拉取失败');
