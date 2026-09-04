@@ -7,6 +7,26 @@ window.API = (() => {
   const KEY_BILI = 'materall_bili_api_key';
   const MODEL_ARK = 'materall_chat_model';
   const MODEL_BILI = 'materall_bili_chat_model';
+  const ACCESS_STORE = 'materall_access_code'; // 服务端访问码（部署者开启 ACCESS_CODE 时必填）
+
+  /** 服务端状态（health 探测结果）：managed=共享 Key 托管，accessRequired=需访问码 */
+  let srv = { managed: { ark: false, bili: false }, accessRequired: false };
+
+  function getAccessCode() { return localStorage.getItem(ACCESS_STORE) || ''; }
+  function setAccessCode(code) {
+    if (code) localStorage.setItem(ACCESS_STORE, code.trim());
+    else localStorage.removeItem(ACCESS_STORE);
+  }
+  /** 当前识别/对话服务商是否由服务端托管 Key（免填） */
+  function isManaged() {
+    return getProvider() === 'bili' ? !!srv.managed.bili : !!srv.managed.ark;
+  }
+  /** 方舟（生图/生视频/擦除）是否由服务端托管 Key */
+  function isArkManaged() { return !!srv.managed.ark; }
+  /** 服务端是否开启访问码 */
+  function accessRequired() { return !!srv.accessRequired; }
+  /** 服务端托管状态原始值（供 UI 展示） */
+  function getManaged() { return { ark: !!srv.managed.ark, bili: !!srv.managed.bili }; }
 
   function getProvider() { return localStorage.getItem(PROVIDER_STORAGE) || 'ark'; }
   function setProvider(p) { localStorage.setItem(PROVIDER_STORAGE, p === 'bili' ? 'bili' : 'ark'); }
@@ -31,7 +51,9 @@ window.API = (() => {
     else localStorage.removeItem(store);
   }
   function hasKey() {
-    return !!getKey();
+    if (getKey()) return true;
+    // 服务端托管共享 Key 时视为可用
+    return isManaged();
   }
   // 方舟 Key（生图/生视频/AI 抹除固定走方舟；识别/对话切到方舟时也是它，双轨并存不冲突）
   function getArkKey() { return localStorage.getItem(KEY_ARK) || ''; }
@@ -39,7 +61,7 @@ window.API = (() => {
     if (k) localStorage.setItem(KEY_ARK, k.trim());
     else localStorage.removeItem(KEY_ARK);
   }
-  function hasArkKey() { return !!getArkKey(); }
+  function hasArkKey() { return !!getArkKey() || isArkManaged(); }
 
   // 对话模型降级候选（2026-08 方舟当前有效 ID；老一代 doubao-pro-32k / 1.5 系列已退役）
   // 按推荐顺序：最新旗舰 Evolving → 2.1 → 2.0 → 1.6
@@ -75,11 +97,23 @@ window.API = (() => {
 
   /** 是否静态部署模式（无后端）：启动时探测 /api/health 失败即判定 */
   let staticMode = null; // null=未探测 true=静态 false=有后端
+  async function probeHealth() {
+    const r = await fetch('/api/health', { method: 'GET' });
+    const okJson = r.ok && r.headers.get('content-type')?.includes('json');
+    if (okJson) {
+      try {
+        const j = await r.json();
+        if (j && j.managed) srv = { managed: { ark: !!j.managed.ark, bili: !!j.managed.bili }, accessRequired: !!j.managed.accessRequired };
+        return j;
+      } catch { /* ignore */ }
+    }
+    return null;
+  }
   async function detectStaticMode() {
     if (staticMode !== null) return staticMode;
     try {
-      const r = await fetch('/api/health', { method: 'GET' });
-      staticMode = !(r.ok && r.headers.get('content-type')?.includes('json'));
+      const j = await probeHealth();
+      staticMode = !j;
     } catch {
       staticMode = true;
     }
@@ -94,6 +128,7 @@ window.API = (() => {
     }
     const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
     // 双轨 Key：生图/生视频/局部重绘固定走火山方舟（X-ARK-Key）；对话/识别/模型列表走当前服务商 Key（X-API-Key）
+    // 本地未填 Key 时不带 Key 头 —— 服务端若配置了共享托管 Key（ARK_API_KEY/BILI_API_KEY）会自动兜底
     const isArkEndpoint = /^\/(api\/(image|video|proxy)|api\/image\/edit)/.test(path);
     if (isArkEndpoint) {
       const ark = getArkKey();
@@ -102,6 +137,9 @@ window.API = (() => {
       const key = getKey();
       if (key) headers['X-API-Key'] = key;
     }
+    // 服务端开启访问码时携带（部署者授权后才可用）
+    const ac = getAccessCode();
+    if (ac) headers['X-Access-Code'] = ac;
     let resp;
     try {
       // AI 对话/模型探测加 100s 超时保护，避免"翻译中"无限挂起
@@ -142,9 +180,10 @@ window.API = (() => {
     return data;
   }
 
-  /** 健康检查：返回服务与 API Key 状态 */
+  /** 健康检查：返回服务与 API Key 状态（同时刷新托管/访问码状态） */
   async function health() {
-    return request('/api/health', { method: 'GET' });
+    if (await detectStaticMode()) return { ok: false, static: true };
+    return probeHealth();
   }
 
   /** 查询账号下已开通的模型列表（用于自动探测可用对话模型；provider 决定请求哪个网关） */
@@ -344,5 +383,5 @@ window.API = (() => {
     return resp.blob();
   }
 
-  return { getKey, setKey, hasKey, getArkKey, setArkKey, hasArkKey, getProvider, setProvider, getChatModel, setChatModel, request, health, listModels, chat, chatTest, chatVision, genImage, createVideo, videoStatus, proxyUrl, fetchBlob, detectStaticMode, isStaticMode };
+  return { getKey, setKey, hasKey, getArkKey, setArkKey, hasArkKey, getProvider, setProvider, getChatModel, setChatModel, request, health, listModels, chat, chatTest, chatVision, genImage, createVideo, videoStatus, proxyUrl, fetchBlob, detectStaticMode, isStaticMode, isManaged, isArkManaged, accessRequired, getAccessCode, setAccessCode, getManaged };
 })();

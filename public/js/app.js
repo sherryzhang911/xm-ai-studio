@@ -202,7 +202,10 @@ window.MA = (() => {
   function openSettings() {
     document.getElementById('settingsMask').classList.remove('hidden');
     document.getElementById('settingsModal').classList.remove('hidden');
+    const acEl = document.getElementById('settingsAccessCode');
+    if (acEl) acEl.value = API.getAccessCode();
     applyProvUI();
+    refreshManagedHint();
     document.getElementById('settingsResult').classList.add('hidden');
   }
   function closeSettings() {
@@ -249,6 +252,9 @@ window.MA = (() => {
       }
     }
     document.getElementById('settingsSave').addEventListener('click', async () => {
+      // 访问码一并保存（无论是否开启都允许留空/修改）
+      const acInp = document.getElementById('settingsAccessCode');
+      if (acInp) API.setAccessCode(acInp.value.trim());
       const mode = getKeyMode();
       const p = API.getProvider();
       const key = document.getElementById('settingsApiKey').value.trim();
@@ -259,6 +265,15 @@ window.MA = (() => {
       result.classList.remove('hidden');
       result.className = 'settings-result';
       if (!key) {
+        if (API.isManaged()) {
+          // 服务端托管共享 Key：无需填写，直接可用
+          result.innerHTML = '🔑 当前识别/对话由<b>服务端托管共享 Key</b>，无需填写即可使用。';
+          result.classList.add('ok');
+          refreshManagedHint();
+          refreshApiStatus();
+          UI.toast('托管模式已就绪，可直接使用 AI 功能 🎉', 'ok');
+          return;
+        }
         result.textContent = '⚠️ 请输入 API Key';
         result.classList.add('err');
         btn.disabled = false;
@@ -349,14 +364,39 @@ window.MA = (() => {
     const text = document.querySelector('.api-status-text');
     try {
       const health = await API.health();
-      const ready = !!(API.getKey() || health.ark?.envKeyConfigured);
+      const managedOn = !!(health && health.managed && (health.managed.ark || health.managed.bili));
+      const ready = !!(API.getKey() || managedOn || (health && health.ark && health.ark.envKeyConfigured));
       dot.className = 'dot ' + (ready ? 'dot-green' : 'dot-red');
       // 文案准确化："已配置"而非"已连接"（是否有效以真实调用为准）
-      text.textContent = ready ? '方舟 Key 已配置' : 'API 未配置';
+      if (!API.getKey() && managedOn) text.textContent = '共享 Key 已托管';
+      else text.textContent = ready ? '方舟 Key 已配置' : 'API 未配置';
     } catch {
       dot.className = 'dot dot-red';
       text.textContent = '服务未启动';
     }
+  }
+
+  /** 设置弹窗内展示「服务端托管共享 Key」提示条 */
+  async function refreshManagedHint() {
+    const hero = document.querySelector('.settings-hero');
+    if (!hero) return;
+    let old = document.getElementById('settingsManagedHint');
+    if (old) old.remove();
+    if (await API.detectStaticMode()) return;
+    const m = API.getManaged();
+    const needs = API.accessRequired();
+    if (!(m.ark || m.bili) && !needs) return;
+    const parts = [];
+    if (m.bili) parts.push('识别/对话（Bilibili）<b style="color:var(--ok)">已托管</b>');
+    if (m.ark) parts.push('AI 生图/生视频（方舟）<b style="color:var(--ok)">已托管</b>');
+    const hint = document.createElement('div');
+    hint.id = 'settingsManagedHint';
+    hint.style.cssText = 'padding:9px 12px;border-radius:9px;font-size:12px;line-height:1.8;margin:2px 0 10px;background:rgba(52,211,153,.08);border:1px dashed rgba(52,211,153,.35);color:var(--text-2)';
+    hint.innerHTML = (parts.length
+      ? `🔑 本服务由<b>部署者托管共享 Key</b>：${parts.join('，')} —— 无需填写即可使用，Key 明文不会下发到你的浏览器。`
+      : '')
+      + (needs ? '<br>🛡️ 本服务需要<b>访问码</b>：向部署者索取，填到下方「访问码」并保存。' : '');
+    if (hint.innerHTML) hero.insertAdjacentElement('afterend', hint);
   }
 
   /* ---------- 帮助 ---------- */
@@ -395,6 +435,23 @@ window.MA = (() => {
       text.innerHTML = msg;
       banner.classList.remove('hidden');
       document.getElementById('envBannerClose').addEventListener('click', () => banner.classList.add('hidden'));
+    }
+    // 服务端开启访问码且本机未保存 → 引导输入（部署者授权后才可用 AI）
+    if (!(await API.detectStaticMode()) && API.accessRequired() && !API.getAccessCode()) {
+      UI.modal(`
+        <p style="font-size:13px;color:var(--text-2);margin-bottom:6px">🛡️ 此服务由部署者开启了<b>访问码保护</b>，请输入访问码后使用 AI 功能：</p>
+        <input class="input" id="accessCodeInput" type="password" placeholder="访问码（向部署者索取）" style="width:100%">
+        <button class="btn btn-primary btn-block" id="accessCodeSave" style="margin-top:12px">保存并进入</button>
+        <p style="font-size:11.5px;color:var(--text-3);margin-top:8px">访问码仅保存在本机浏览器；本地功能（包框合成/智能剪辑等）不受影响</p>
+      `, { title: '输入访问码' });
+      document.getElementById('accessCodeSave').addEventListener('click', () => {
+        const code = document.getElementById('accessCodeInput').value.trim();
+        if (!code) return UI.toast('请输入访问码', 'warn');
+        API.setAccessCode(code);
+        UI.closeModal();
+        refreshApiStatus();
+        UI.toast('访问码已保存，可直接使用 AI 功能', 'ok');
+      });
     }
   }
 

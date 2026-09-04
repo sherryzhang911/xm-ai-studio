@@ -5,7 +5,10 @@
  *  2. 代理火山方舟 API（生图 / 生视频 / 对话 / 任务查询），避免前端暴露密钥与 CORS 问题
  *  3. 提供文件下载代理，供前端 ffmpeg 剪辑模块拉取素材
  *
- * 鉴权策略：优先使用请求头 X-API-Key（前端设置中填写），其次使用环境变量 ARK_API_KEY
+ * 鉴权策略：①请求头 X-ARK-Key / X-API-Key（访问者各自填写）
+ *          ②服务端托管 Key（环境变量 ARK_API_KEY=方舟、BILI_API_KEY=Bilibili llmapi）
+ *            部署者配置共享 Key 后访问者免填且看不到明文
+ *          ③可选访问码 ACCESS_CODE：开启后所有 /api 请求需带 X-Access-Code 头（除 health）
  */
 require('dotenv').config();
 const express = require('express');
@@ -28,14 +31,27 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
+/* ---------------- 访问码（可选）：部署者可开启，仅授权者可调用 AI ----------------
+ * 开启方式：环境变量 ACCESS_CODE=你的口令
+ * 前端在 localStorage 保存口令后，所有 /api 请求自动带 X-Access-Code 头
+ */
+const ACCESS_CODE = (process.env.ACCESS_CODE || '').trim();
+app.use('/api', (req, res, next) => {
+  if (!ACCESS_CODE) return next();
+  if (req.path === '/health') return next(); // health 放行，前端用它探测状态
+  if ((req.headers['x-access-code'] || '').trim() === ACCESS_CODE) return next();
+  return res.status(403).json({ error: { code: 'ACCESS_DENIED', message: '需要访问码：请联系部署者获取，在页面右上角「连接设置」中输入' } });
+});
+
 /* ---------------- 工具 ---------------- */
 
-function resolveKey(req) {
-  // 双轨：X-ARK-Key（生图/视频/局部重绘，方舟）优先；其次 X-API-Key（识别/对话当前服务商）；最后环境变量
+function resolveKey(req, providerHint) {
+  // 三轨：①X-ARK-Key（方舟）②X-API-Key（当前服务商）③服务端托管 Key（按服务商取环境变量）
   const arkKey = (req.headers['x-ark-key'] || '').trim();
   if (arkKey) return arkKey;
   const headerKey = (req.headers['x-api-key'] || '').trim();
   if (headerKey) return headerKey;
+  if (providerHint === 'bili') return (process.env.BILI_API_KEY || '').trim();
   return (process.env.ARK_API_KEY || '').trim();
 }
 
@@ -45,7 +61,7 @@ function fail(res, status, code, message) {
 
 /** 调用所选服务商 API（OpenAI 兼容），返回解析后的 JSON */
 async function arkFetch(req, apiPath, body, extraHeaders = {}) {
-  const key = resolveKey(req);
+  const key = resolveKey(req, req.body && req.body.provider);
   const base = baseOf(req.body && req.body.provider);
   if (!key) {
     const err = new Error('未配置所选服务商的 API Key');
@@ -87,15 +103,21 @@ async function arkFetch(req, apiPath, body, extraHeaders = {}) {
 
 // 健康检查 / 配置状态
 app.get('/api/health', (req, res) => {
-  const hasEnvKey = !!(process.env.ARK_API_KEY || '').trim();
+  const hasArk = !!(process.env.ARK_API_KEY || '').trim();
+  const hasBili = !!(process.env.BILI_API_KEY || '').trim();
   res.json({
     ok: true,
     name: 'XM AI Studio',
     version: '1.0.0',
+    managed: { ark: hasArk, bili: hasBili, accessRequired: !!ACCESS_CODE },
     ark: {
       base: ARK_BASE,
-      envKeyConfigured: hasEnvKey,
+      envKeyConfigured: hasArk,
       keyProvided: !!(req.headers['x-api-key'] || '').trim(),
+    },
+    bili: {
+      base: BILI_BASE,
+      envKeyConfigured: hasBili,
     },
   });
 });
@@ -103,7 +125,7 @@ app.get('/api/health', (req, res) => {
 // 查询账号下已开通的模型列表（OpenAI 兼容 /models，用于自动探测可用对话模型；?provider=ark|bili）
 app.get('/api/models', async (req, res) => {
   try {
-    const key = resolveKey(req);
+    const key = resolveKey(req, req.query.provider);
     const base = baseOf(req.query.provider);
     if (!key) return fail(res, 401, 'MISSING_API_KEY', '未配置所选服务商的 API Key');
     const controller = new AbortController();
@@ -603,7 +625,10 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`  本地访问: http://localhost:${PORT}`);
   lanIps.forEach((ip) => console.log(`  局域网访问: http://${ip}:${PORT}  ← 把这个链接发给同事`));
   console.log(`  方舟 API: ${ARK_BASE}`);
-  console.log(`  环境变量 Key: ${process.env.ARK_API_KEY ? '已配置' : '未配置（可在前端设置中填写）'}`);
+  console.log(`  Bilibili: ${BILI_BASE}`);
+  const fmt = (v) => (v ? '已配置(共享托管)' : '未配置');
+  console.log(`  托管 Key(共享免填): 方舟[${fmt((process.env.ARK_API_KEY || '').trim())}] Bili[${fmt((process.env.BILI_API_KEY || '').trim())}]`);
+  console.log(`  访问码: ${ACCESS_CODE ? '已开启(需 X-Access-Code)' : '未开启'}`);
   console.log('============================================');
 });
 
