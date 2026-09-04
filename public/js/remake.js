@@ -76,6 +76,12 @@ window.RemakeView = (() => {
       img.src = source;
     });
   }
+  function isImgDataURL(s) { return typeof s === 'string' && /^data:image\//i.test(s); }
+  /** 任意图源（dataURL / blob: / http）→ 归一为 dataURL；失败返回 null（避免把非 base64 当图发给网关） */
+  async function ensureDataURL(u) {
+    if (isImgDataURL(u)) return u;
+    try { return await toDataURL(API.proxyUrl(u)); } catch { return null; }
+  }
   function compressToDataURL(blob, maxSide = 1024) {
     return new Promise((resolve, reject) => {
       const url = URL.createObjectURL(blob);
@@ -126,8 +132,15 @@ window.RemakeView = (() => {
       if (f.size > 15 * 1024 * 1024) { UI.toast(`「${f.name}」超过 15MB，已跳过`, 'warn'); continue; }
       const source = URL.createObjectURL(f);
       const meta = await readImgMeta(source);
-      let dataURL = source;
-      try { dataURL = await compressToDataURL(f); } catch { /* 保持 blob URL */ }
+      // dataURL 必须始终是 data:image 前缀（曾出现压缩失败回退 blob URL → 网关 Invalid base64）
+      let dataURL = null;
+      try { dataURL = await compressToDataURL(f); } catch { /* 降级原图 */ }
+      if (!dataURL) { try { dataURL = await blobToDataURL(f); } catch { dataURL = null; } }
+      if (!dataURL || !isImgDataURL(dataURL)) {
+        try { URL.revokeObjectURL(source); } catch { /* ignore */ }
+        UI.toast(`「${f.name}」无法读取为图片，已跳过`, 'warn');
+        continue;
+      }
       st.refs.push({ name: f.name, source, dataURL, w: meta.w, h: meta.h });
     }
     save();
@@ -143,8 +156,14 @@ window.RemakeView = (() => {
       if (f.size > 15 * 1024 * 1024) { UI.toast(`「${f.name}」超过 15MB，已跳过`, 'warn'); continue; }
       const source = URL.createObjectURL(f);
       const meta = await readImgMeta(source);
-      let dataURL = source;
-      try { dataURL = await compressToDataURL(f); } catch { /* 保持 blob URL */ }
+      let dataURL = null;
+      try { dataURL = await compressToDataURL(f); } catch { /* 降级原图 */ }
+      if (!dataURL) { try { dataURL = await blobToDataURL(f); } catch { dataURL = null; } }
+      if (!dataURL || !isImgDataURL(dataURL)) {
+        try { URL.revokeObjectURL(source); } catch { /* ignore */ }
+        UI.toast(`「${f.name}」无法读取为图片，已跳过`, 'warn');
+        continue;
+      }
       st.myRefs.push({ name: f.name, source, dataURL, w: meta.w, h: meta.h });
     }
     save();
@@ -404,7 +423,7 @@ ${style}
           <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">
             ${st.refs.map((r, i) => `
               <div style="position:relative;border:1px solid var(--border-light);border-radius:9px;padding:5px;background:var(--bg-soft,#0e1119)">
-                <img src="${r.source}" style="height:64px;border-radius:6px;display:block">
+                <img src="${r.dataURL || r.source}" style="height:64px;border-radius:6px;display:block">
                 <p style="font-size:10px;color:var(--text-3);margin:4px 0 0;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${i + 1}. ${UI.escapeHtml(r.name)}</p>
                 <div style="display:flex;gap:3px;margin-top:3px">
                   <button class="btn-icon rm-ref-move" data-i="${i}" data-dir="-1" title="上移" style="font-size:10px">↑</button>
@@ -431,7 +450,7 @@ ${style}
             <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
               ${st.myRefs.map((r, i) => `
                 <div style="position:relative;border:1px solid var(--border-light);border-radius:9px;padding:5px;background:var(--bg-soft,#0e1119)">
-                  <img src="${r.source}" style="height:52px;border-radius:6px;display:block">
+                  <img src="${r.dataURL || r.source}" style="height:52px;border-radius:6px;display:block">
                   <p style="font-size:10px;color:var(--text-3);margin:4px 0 0;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${UI.escapeHtml(r.name)}</p>
                   <button class="btn-icon rm-myref-del" data-i="${i}" title="移除" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.65)">✕</button>
                 </div>`).join('')}
@@ -578,7 +597,7 @@ ${style}
       <div class="card" style="margin-bottom:12px;padding:14px">
         <div style="display:flex;gap:14px;flex-wrap:wrap">
           <div style="flex-shrink:0">
-            <img src="${s.ref.source}" style="height:110px;border-radius:8px;display:block;border:1px solid var(--border-light)">
+            <img src="${s.ref.dataURL || s.ref.source}" style="height:110px;border-radius:8px;display:block;border:1px solid var(--border-light)">
             <p style="font-size:10.5px;color:var(--text-3);margin:4px 0 0;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${i + 1}. ${UI.escapeHtml(s.ref.name)}</p>
           </div>
           <div style="flex:1;min-width:260px">
@@ -644,7 +663,13 @@ ${style}
     const content = document.querySelector('#content');
     if (content && mode === 'review') renderReview(content);
     try {
-      const images = [s.ref.dataURL, ...st.myRefs.map((r) => r.dataURL)];
+      // 参考图统一归一为 dataURL；失效图自动剔除（避免把 blob URL 当 base64 发给网关 → Invalid base64）
+      const imgsArr = await Promise.all(
+        [s.ref.dataURL, ...st.myRefs.map((r) => r.dataURL)].map((u) => ensureDataURL(u)),
+      );
+      const images = imgsArr.filter(Boolean);
+      if (!images.length) throw new Error('参考图不可用（可能已失效），请重新上传竞品参考图');
+      if (images.length < imgsArr.length) cur.logs.push(`⚠️ ${imgsArr.length - images.length} 张参考图已失效被跳过`);
       if (st.consistency && i > 0) {
         const prev = shots[i - 1];
         if (prev && prev.status === 'ok' && prev.urls && prev.urls.length) {
@@ -769,7 +794,10 @@ ${style}
       let firstFrame = s.ref.dataURL;
       if (s.urls && s.urls.length) {
         try { firstFrame = await toDataURL(API.proxyUrl(s.urls[s.chosen || 0])); } catch { /* 保持参考帧 */ }
+      } else {
+        firstFrame = (await ensureDataURL(firstFrame)) || null; // 参考帧归一，失效则为 null
       }
+      if (!firstFrame) throw new Error(`镜${i + 1} 首帧参考图不可用，请重新生成该镜或重新上传参考图`);
       setVideoProgress(videoArea, i, okShots.length, '提交图生视频任务…', s);
       const task = await API.createVideo({
         model: st.videoModel,
@@ -1031,7 +1059,11 @@ ${style}
         updateProgress();
         if (st.aiSplit) {
           try {
-            const r = await API.chatVision(splitPrompt(i), [st.refs[i].dataURL, ...st.myRefs.map((m) => m.dataURL)]);
+            const visImgs = (await Promise.all(
+              [st.refs[i].dataURL, ...st.myRefs.map((m) => m.dataURL)].map((u) => ensureDataURL(u)),
+            )).filter(Boolean);
+            if (!visImgs.length) throw new Error('参考图不可用');
+            const r = await API.chatVision(splitPrompt(i), visImgs);
             prompts.push(r.content || fallbackPrompt());
             cur.logs.push(`[镜${i + 1}] ✅ 爆款逻辑拆解完成`);
           } catch (e) {
