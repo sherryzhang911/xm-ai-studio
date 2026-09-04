@@ -214,6 +214,16 @@ app.post('/api/image', async (req, res) => {
     } = req.body;
     if (!prompt) return fail(res, 400, 'BAD_REQUEST', '提示词不能为空');
 
+    // 参考图格式校验：仅接受 data:image 或 http(s)，非法值直接在本地报错（网关的 Invalid base64 不利于定位）
+    if (Array.isArray(images) && images.length) {
+      for (let idx = 0; idx < images.length; idx++) {
+        const im = String(images[idx] || '');
+        if (/^data:image\//i.test(im)) continue;
+        if (/^https?:\/\//i.test(im)) continue;
+        return fail(res, 400, 'BAD_REF_IMAGE', `第 ${idx + 1} 张参考图格式无效（不是图片数据/链接）。请删除该图后重新上传`);
+      }
+    }
+
     // size 参数规范化：API 仅接受 '宽x高'（如 1024x1792）或 2k/3k/4k；
     // 不支持的取值（如 1K / 1k / 大写 2K）自动映射为 2k，避免 400 报错
     let finalSize = String(size || '2k').trim().toLowerCase();
@@ -254,6 +264,9 @@ app.post('/api/image/edit', async (req, res) => {
   try {
     const { image = '', prompt = '', model = 'doubao-seedream-4-0-250828', watermark = false } = req.body;
     if (!image || !prompt) return fail(res, 400, 'BAD_REQUEST', '缺少 image 或 prompt');
+    if (!/^data:image\//i.test(String(image)) && !/^https?:\/\//i.test(String(image))) {
+      return fail(res, 400, 'BAD_REF_IMAGE', '待处理图片格式无效（不是图片数据/链接）。请重新选择图片');
+    }
     const key = resolveKey(req);
     if (!key) return fail(res, 401, 'MISSING_API_KEY', '未配置所选服务商的 API Key（生图/局部重绘需火山方舟 Key）');
     const controller = new AbortController();
@@ -588,7 +601,8 @@ app.get('/api/proxy', async (req, res) => {
       clearTimeout(timer);
     }
   } catch (e) {
-    fail(res, 502, 'PROXY_ERROR', e.message);
+    console.error('[proxy] 素材拉取失败:', String(url).slice(0, 120), '->', (e && e.message) || e);
+    fail(res, 502, 'PROXY_ERROR', e.message || '素材拉取失败');
   }
 });
 

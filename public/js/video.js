@@ -347,14 +347,33 @@ window.VideoView = (() => {
         } else if (btn.dataset.op === 'play') {
           UI.modal(`<video src="${API.proxyUrl(t.videoUrl)}" controls autoplay style="width:100%;border-radius:10px;background:#000"></video>`, { title: '视频预览' });
         } else if (btn.dataset.op === 'dl') {
-          const a = document.createElement('a');
-          a.href = API.proxyUrl(t.videoUrl);
-          a.download = `materall_video_${t.id}.mp4`;
-          a.target = '_blank';
-          a.click();
+          downloadVideo(t);
         }
       });
     });
+  }
+
+  /** 下载视频：先经代理拉取为 Blob 再保存；失败给出可读原因 */
+  async function downloadVideo(t) {
+    try {
+      const blob = await API.fetchBlob(t.videoUrl);
+      if (!blob || blob.size < 1000) throw new Error('返回内容为空');
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `materall_video_${(t.text || 'clip').slice(0, 24)}.mp4`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 8000);
+      UI.toast('下载已开始', 'ok', 2000);
+    } catch (e) {
+      const m = String((e && e.message) || e);
+      let hint = '视频链接已过期或服务暂不可用，请重新生成';
+      if (/401|403|404/.test(m)) hint = '视频链接已过期（生成平台的视频链接有时效），请重新生成一条';
+      else if (/Failed to fetch|network|网络/i.test(m)) hint = '网络异常，请稍后重试';
+      UI.toast(`下载失败：${hint}`, 'err', 6000);
+      console.warn('[dl]', t.videoUrl, e);
+    }
   }
 
   /** 外部：设置首帧图 */

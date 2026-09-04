@@ -77,10 +77,17 @@ window.RemakeView = (() => {
     });
   }
   function isImgDataURL(s) { return typeof s === 'string' && /^data:image\//i.test(s); }
-  /** 任意图源（dataURL / blob: / http）→ 归一为 dataURL；失败返回 null（避免把非 base64 当图发给网关） */
+  /** 任意图源（dataURL / blob: / http）→ 归一为 dataURL；非图片内容或失败一律返回 null（防止把 JSON/HTML 当图发给网关） */
   async function ensureDataURL(u) {
     if (isImgDataURL(u)) return u;
-    try { return await toDataURL(API.proxyUrl(u)); } catch { return null; }
+    try {
+      const resp = await fetch(API.proxyUrl(u));
+      if (!resp.ok) return null;
+      const blob = await resp.blob();
+      if (!blob || !(blob.type || '').startsWith('image/')) return null;
+      const d = await blobToDataURL(blob);
+      return isImgDataURL(d) ? d : null;
+    } catch { return null; }
   }
   function compressToDataURL(blob, maxSide = 1024) {
     return new Promise((resolve, reject) => {
@@ -673,7 +680,8 @@ ${style}
       if (st.consistency && i > 0) {
         const prev = shots[i - 1];
         if (prev && prev.status === 'ok' && prev.urls && prev.urls.length) {
-          images.push(await toDataURL(API.proxyUrl(prev.urls[prev.chosen || 0])));
+          const prevF = await ensureDataURL(prev.urls[prev.chosen || 0]);
+          if (prevF) images.push(prevF);
         }
       }
       const data = await API.genImage({
