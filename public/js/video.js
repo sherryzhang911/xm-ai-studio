@@ -19,8 +19,30 @@ window.VideoView = (() => {
     '小猫在窗边打哈欠，阳光洒进来，毛发细节清晰，治愈系',
   ];
 
-  let tasks = []; // {id, text, model, time, status, videoUrl, thumb, polling}
+  let tasks = loadTasks(); // {id, text, model, time, status, videoUrl, error, polling}
   let firstFrameUrl = '';
+  const TASKS_STORE = 'materall_video_tasks'; // 任务历史持久化（刷新后仍在，同域名内可见）
+
+  /** 读取历史任务（恢复 polling=false；过期的排队任务忽略） */
+  function loadTasks() {
+    try {
+      const j = JSON.parse(localStorage.getItem(TASKS_STORE) || '[]');
+      if (!Array.isArray(j)) return [];
+      const now = Date.now();
+      return j
+        .filter((t) => t && t.id && ((t.status !== 'queued' && t.status !== 'running') || (t.time || 0) > now - 2 * 3600e3))
+        .map((t) => ({ ...t, polling: false }));
+    } catch { return []; }
+  }
+  function saveTasks() {
+    try {
+      const light = tasks.slice(0, 50).map((t) => ({
+        id: t.id, text: t.text, model: t.model, time: t.time,
+        status: t.status, videoUrl: t.videoUrl || null, error: t.error || '',
+      }));
+      localStorage.setItem(TASKS_STORE, JSON.stringify(light));
+    } catch { /* ignore */ }
+  }
 
   function render(el) {
     el.innerHTML = `
@@ -155,6 +177,11 @@ window.VideoView = (() => {
     });
 
     renderTasks(el);
+    // 恢复历史：对仍排队的任务续上轮询（进入页面时刷新一次状态）
+    setTimeout(() => {
+      tasks.filter((t) => (t.status === 'queued' || t.status === 'running') && !t.polling)
+        .forEach((t) => pollTask(t.id));
+    }, 800);
   }
 
   async function submit() {
@@ -188,6 +215,7 @@ window.VideoView = (() => {
         polling: false,
       };
       tasks = [task, ...tasks];
+      saveTasks();
       renderTasks(document.querySelector('#videoTaskList')?.closest('.gen-result'));
       UI.toast('任务已提交，正在排队生成', 'ok');
       pollTask(task.id);
@@ -199,6 +227,7 @@ window.VideoView = (() => {
       else if (/does not exist|do not have access/i.test(msg)) hint = '模型未开通：请到方舟「模型广场」开通所选 Seedance 模型';
       else if (/429|quota|rate/i.test(msg)) hint = '请求过快或配额不足，请稍后重试';
       tasks = [{ id: 'err_' + Date.now(), text, model: document.querySelector('#videoModel').value, time: Date.now(), status: 'failed', videoUrl: null, error: hint || msg.slice(0, 100), polling: false }, ...tasks];
+      saveTasks();
       renderTasks(document.querySelector('#videoTaskList')?.closest('.gen-result'));
       UI.toast(hint || msg.slice(0, 80), 'err', 7000);
     } finally {
@@ -217,6 +246,7 @@ window.VideoView = (() => {
       if (data.videoUrl) {
         task.videoUrl = data.videoUrl;
         task.status = 'succeeded';
+        saveTasks();
         // 自动保存到作品中心
         try {
           await Store.add({
@@ -230,6 +260,7 @@ window.VideoView = (() => {
         UI.toast('视频生成完成 🎉', 'ok', 4000);
       } else if (data.status === 'failed') {
         task.error = '生成失败';
+        saveTasks();
       } else {
         // 继续轮询
         setTimeout(() => { task.polling = false; pollTask(id); }, 5000);
@@ -252,6 +283,19 @@ window.VideoView = (() => {
     const listEl = el.querySelector('#videoTaskList');
     const countEl = el.querySelector('#videoTaskCount');
     countEl.textContent = `${tasks.length} 个任务`;
+    // 预览加载失败（视频链接可能已过期）→ 给出明确提示，用户可用右侧下载
+    if (!listEl.__errBound) {
+      listEl.__errBound = true;
+      listEl.addEventListener('error', (e) => {
+        if (!e.target || e.target.tagName !== 'VIDEO') return;
+        const item = e.target.closest('.task-item');
+        const thumb = item && item.querySelector('.thumb');
+        if (item && thumb && !thumb.dataset.fail) {
+          thumb.dataset.fail = '1';
+          thumb.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:10.5px;color:var(--text-3);text-align:center;padding:2px">⚠️ 预览失败<br>链接可能已过期<br>用右侧「⬇ 下载」</div>';
+        }
+      }, true);
+    }
     if (tasks.length === 0) {
       listEl.innerHTML = `<div class="empty-state"><div class="big-ico">🎬</div><p>提交任务后将在这里实时跟踪生成进度<br>完成后可下载、保存，或直接送入「智能剪辑」</p></div>`;
       return;
