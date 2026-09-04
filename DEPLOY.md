@@ -25,6 +25,7 @@ git commit -m "XM AI Studio"
 | Runtime | Node |
 | Build Command | `npm install` |
 | Start Command | `node server.js` |
+| Health Check Path | `/api/health`（可选，填了免费版不会误判挂机） |
 | Instance Type | Free |
 
 ### 3. 环境变量（可选，推荐）
