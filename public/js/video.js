@@ -19,9 +19,9 @@ window.VideoView = (() => {
     '小猫在窗边打哈欠，阳光洒进来，毛发细节清晰，治愈系',
   ];
 
+  const TASKS_STORE = 'materall_video_tasks'; // 任务历史持久化（刷新后仍在，同域名内可见）
   let tasks = loadTasks(); // {id, text, model, time, status, videoUrl, error, polling}
   let firstFrameUrl = '';
-  const TASKS_STORE = 'materall_video_tasks'; // 任务历史持久化（刷新后仍在，同域名内可见）
 
   /** 读取历史任务（恢复 polling=false；过期的排队任务忽略） */
   function loadTasks() {

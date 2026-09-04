@@ -371,7 +371,11 @@ window.API = (() => {
   function proxyUrl(url) {
     if (!url) return url;
     if (/^data:/i.test(url) || /^blob:/i.test(url) || url.startsWith('/')) return url;
-    if (url.startsWith('http')) return `/api/proxy?url=${encodeURIComponent(url)}`;
+    if (url.startsWith('http')) {
+      // 访问码用 query 传递：<video>/<img>/<a download> 等媒体元素无法携带请求头，代理接口据此鉴权
+      const ac = getAccessCode();
+      return `/api/proxy?url=${encodeURIComponent(url)}${ac ? `&ac=${encodeURIComponent(ac)}` : ''}`;
+    }
     return url;
   }
 

@@ -38,7 +38,8 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 const ACCESS_CODE = (process.env.ACCESS_CODE || '').trim();
 app.use('/api', (req, res, next) => {
   if (!ACCESS_CODE) return next();
-  if (req.path === '/health') return next(); // health 放行，前端用它探测状态
+  // health/proxy 放行：proxy 在自身路由内用 ?ac= 校验（媒体元素无法带请求头）
+  if (req.path === '/health' || req.path === '/proxy') return next();
   if ((req.headers['x-access-code'] || '').trim() === ACCESS_CODE) return next();
   return res.status(403).json({ error: { code: 'ACCESS_DENIED', message: '需要访问码：请联系部署者获取，在页面右上角「连接设置」中输入' } });
 });
@@ -566,11 +567,36 @@ app.get('/api/tts', async (req, res) => {
 app.get('/api/proxy', async (req, res) => {
   const url = req.query.url || '';
   if (!url || !/^https?:\/\//.test(url)) return fail(res, 400, 'BAD_REQUEST', '无效的 URL');
+  // 访问码鉴权（query 参数形式，媒体元素无法带请求头）；开启访问码后 ?ac= 必须匹配
+  if (ACCESS_CODE && String(req.query.ac || '') !== ACCESS_CODE) {
+    return fail(res, 403, 'ACCESS_DENIED', '需要访问码');
+  }
+  // 防 SSRF：拒绝内网/环回/链路本地目标（只允许公网拉取）
+  try {
+    const host = new URL(url).hostname;
+    const isIp = /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(':');
+    if (isIp) {
+      const first = Number(host.split('.')[0]);
+      const second = Number(host.split('.')[1] || 0);
+      const blocked = host.startsWith('127.') || host.startsWith('10.') || host.startsWith('169.254.')
+        || host.startsWith('192.168.') || host === '0.0.0.0' || host === '::1'
+        || (first === 172 && second >= 16 && second <= 31) || first === 0;
+      if (blocked) return fail(res, 400, 'FORBIDDEN_URL', '不允许代理内网地址');
+    }
+  } catch { /* hostname 解析失败交给 fetch */ }
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 300000);
     try {
-      const resp = await fetch(url, { signal: controller.signal, redirect: 'follow' });
+      // 带浏览器 UA + Referer：TOS 等媒体域名对无 UA/无来源的请求会 403
+      const resp = await fetch(url, {
+        signal: controller.signal,
+        redirect: 'follow',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+          'Accept': 'video/*,image/*,*/*;q=0.8',
+        },
+      });
       if (!resp.ok) {
         return fail(res, resp.status, 'PROXY_ERROR', `素材下载失败 HTTP ${resp.status}`);
       }
