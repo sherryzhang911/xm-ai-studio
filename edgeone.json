@@ -1,7 +1,7 @@
 {
   "name": "xm-ai-studio",
   "installCommand": "npm install",
-  "buildCommand": "echo build-ok",
+  "buildCommand": "node -e \"const fs=require('fs');fs.rmSync('public/vendor/ffmpeg/ffmpeg-core.wasm',{force:true});console.log('removed oversized wasm (EdgeOne 25MB single-file limit); front-end will load it from CDN')\"",
   "outputDirectory": "./public",
   "nodeVersion": "22.11.0",
   "rewrites": [

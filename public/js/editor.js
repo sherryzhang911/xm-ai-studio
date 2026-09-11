@@ -8,11 +8,14 @@
 window.EditorView = (() => {
   const LS_KEY = 'materall_timeline';
   // 剪辑引擎：优先本地内置（public/vendor/ffmpeg），CDN 兜底
+  // 云端部署（EdgeOne 等有单文件 25MB 限制）不含大体积 wasm，会自动降级到国内 CDN
   const FFMPEG_JS = location.origin + '/vendor/ffmpeg/ffmpeg.js';
+  const CORE_VER = '0.12.6';
   const CORE_SETS = [
     { core: location.origin + '/vendor/ffmpeg/ffmpeg-core.js', wasm: location.origin + '/vendor/ffmpeg/ffmpeg-core.wasm' },
-    { core: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js', wasm: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm' },
-    { core: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js', wasm: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm' },
+    { core: `https://registry.npmmirror.com/@ffmpeg/core/${CORE_VER}/files/dist/umd/ffmpeg-core.js`, wasm: `https://registry.npmmirror.com/@ffmpeg/core/${CORE_VER}/files/dist/umd/ffmpeg-core.wasm` },
+    { core: `https://cdn.jsdelivr.net/npm/@ffmpeg/core@${CORE_VER}/dist/umd/ffmpeg-core.js`, wasm: `https://cdn.jsdelivr.net/npm/@ffmpeg/core@${CORE_VER}/dist/umd/ffmpeg-core.wasm` },
+    { core: `https://unpkg.com/@ffmpeg/core@${CORE_VER}/dist/umd/ffmpeg-core.js`, wasm: `https://unpkg.com/@ffmpeg/core@${CORE_VER}/dist/umd/ffmpeg-core.wasm` },
   ];
 
   let ffmpeg = null;          // FFmpeg 实例
