@@ -1,0 +1,31 @@
+{
+  "name": "xm-ai-studio",
+  "installCommand": "npm install",
+  "buildCommand": "echo build-ok",
+  "outputDirectory": "./public",
+  "nodeVersion": "22.11.0",
+  "rewrites": [
+    { "source": "/*", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/*",
+      "headers": [
+        { "key": "Cross-Origin-Opener-Policy", "value": "same-origin" },
+        { "key": "Cross-Origin-Embedder-Policy", "value": "require-corp" }
+      ]
+    },
+    {
+      "source": "/vendor/*",
+      "headers": [
+        { "key": "Cache-Control", "value": "max-age=31536000" }
+      ]
+    }
+  ],
+  "cloudFunctions": {
+    "mainlandRegions": ["ap-guangzhou"],
+    "nodejs": {
+      "maxDuration": 120
+    }
+  }
+}

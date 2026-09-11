@@ -31,6 +31,19 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
+/* ---------------- EdgeOne Pages 适配 ----------------
+ * EdgeOne 的 Node 函数把 /api/* 路由到本文件导出的 Express 实例，
+ * 但传入的 req.url 可能已剥离 /api 前缀；开启 EO_FUNCTIONS=1 时统一补回前缀。
+ */
+if (process.env.EO_FUNCTIONS === '1') {
+  app.use((req, res, next) => {
+    const p = String(req.url || '').split('?')[0];
+    const isStatic = /\.(js|css|png|jpe?g|svg|webp|gif|ico|wasm|json|mp4|woff2?|txt|map)$/i.test(p);
+    if (!p.startsWith('/api/') && !isStatic) req.url = '/api' + req.url;
+    next();
+  });
+}
+
 /* ---------------- 访问码（可选）：部署者可开启，仅授权者可调用 AI ----------------
  * 开启方式：环境变量 ACCESS_CODE=你的口令
  * 前端在 localStorage 保存口令后，所有 /api 请求自动带 X-Access-Code 头
@@ -644,27 +657,33 @@ app.get('*', (req, res) => {
 
 /* ---------------- 启动 ---------------- */
 
-const server = http.createServer(app);
-server.listen(PORT, '0.0.0.0', () => {
-  // 获取局域网 IP，方便分享给其他用户
-  const nets = require('os').networkInterfaces();
-  const lanIps = [];
-  Object.values(nets).forEach((list) => {
-    (list || []).forEach((n) => {
-      if (n.family === 'IPv4' && !n.internal) lanIps.push(n.address);
+// 本地/服务器运行：自建 HTTP 服务；EdgeOne 函数模式：导出 Express 实例由平台调用
+if (process.env.EO_FUNCTIONS === '1') {
+  module.exports = app;
+} else {
+  const server = http.createServer(app);
+  server.listen(PORT, '0.0.0.0', () => {
+    // 获取局域网 IP，方便分享给其他用户
+    const nets = require('os').networkInterfaces();
+    const lanIps = [];
+    Object.values(nets).forEach((list) => {
+      (list || []).forEach((n) => {
+        if (n.family === 'IPv4' && !n.internal) lanIps.push(n.address);
+      });
     });
+    console.log('============================================');
+    console.log('  XM AI Studio 已启动');
+    console.log(`  本地访问: http://localhost:${PORT}`);
+    lanIps.forEach((ip) => console.log(`  局域网访问: http://${ip}:${PORT}  ← 把这个链接发给同事`));
+    console.log(`  方舟 API: ${ARK_BASE}`);
+    console.log(`  Bilibili: ${BILI_BASE}`);
+    const fmt = (v) => (v ? '已配置(共享托管)' : '未配置');
+    console.log(`  托管 Key(共享免填): 方舟[${fmt((process.env.ARK_API_KEY || '').trim())}] Bili[${fmt((process.env.BILI_API_KEY || '').trim())}]`);
+    console.log(`  访问码: ${ACCESS_CODE ? '已开启(需 X-Access-Code)' : '未开启'}`);
+    console.log('============================================');
   });
-  console.log('============================================');
-  console.log('  XM AI Studio 已启动');
-  console.log(`  本地访问: http://localhost:${PORT}`);
-  lanIps.forEach((ip) => console.log(`  局域网访问: http://${ip}:${PORT}  ← 把这个链接发给同事`));
-  console.log(`  方舟 API: ${ARK_BASE}`);
-  console.log(`  Bilibili: ${BILI_BASE}`);
-  const fmt = (v) => (v ? '已配置(共享托管)' : '未配置');
-  console.log(`  托管 Key(共享免填): 方舟[${fmt((process.env.ARK_API_KEY || '').trim())}] Bili[${fmt((process.env.BILI_API_KEY || '').trim())}]`);
-  console.log(`  访问码: ${ACCESS_CODE ? '已开启(需 X-Access-Code)' : '未开启'}`);
-  console.log('============================================');
-});
+  module.exports = app;
+}
 
 process.on('uncaughtException', (e) => console.error('[uncaughtException]', e.message));
 process.on('unhandledRejection', (e) => console.error('[unhandledRejection]', e?.message));
